@@ -9,7 +9,7 @@
 MODULE_LICENSE("Dual BSD/GPL");
 //static void copyString(char * lString, char * rString);
 
-static void timespec_subtract (struct timespec * result, struct timespec * x, struct timespec * y);
+//static void timespec_subtract (struct timespec * result, struct timespec * x, struct timespec * y);
 
 #define BUF_LEN 100 //max length of read/write message
 
@@ -18,22 +18,25 @@ static struct proc_dir_entry *proc_entry; //pointer to proc entry
 static char msg[BUF_LEN];  //buffer to store read/write message
 static int procfs_buf_len; //variable to hold length of message
 
-static struct timespec last_time; 
-static struct timespec elasped_time; 
-//static  current_time; 
+static struct timespec last_time;
+static struct timespec elasped_time;
 
 static ssize_t procfile_read(struct file *file, char *ubuf, size_t count, loff_t *ppos)
 {
     struct timespec current_time = current_kernel_time();
+
     if((long)last_time.tv_sec == 0){
+
         sprintf(msg, "The current time is : %lld.%.9ld\n", (long long) current_time.tv_sec, current_time.tv_nsec);
-        last_time = current_time;
+       last_time = current_time;
+      
     }else{
-        timespec_subtract ( &elasped_time, &current_time, &last_time);
+        elasped_time = timespec_sub(current_time, last_time);
+        //timespec_subtract ( &elasped_time, &last_time, &current_time);
         sprintf(msg, "The current time: %lld.%.9ld\nelasped time: %lld.%.9ld\n", 
         (long long) current_time.tv_sec, current_time.tv_nsec, 
          (long long) elasped_time.tv_sec, elasped_time.tv_nsec );
-   
+      last_time = current_time; 
     }
 
 	printk(KERN_INFO "proc_read\n");
@@ -92,31 +95,18 @@ static void hello_exit(void)
 /* Subtract the `struct timeval' values X and Y,
    storing the result in RESULT.
    Return 1 if the difference is negative, otherwise 0.  */
+/*
+static void timespec_subtract (struct timespec * result, struct timespec * start, struct timespec * stop){
 
-static void timespec_subtract (struct timespec * result, struct timespec * x, struct timespec * y)
-{
-  /* Perform the carry for the later subtraction by updating y. */
-  if (x->tv_nsec < y->tv_nsec) {
-    int nsec = (y->tv_nsec - x->tv_nsec) / 1000000 + 1;
-    y->tv_nsec -= 1000000 * nsec;
-    y->tv_sec += nsec;
-  }
-  if (x->tv_nsec - y->tv_nsec > 1000000) {
-    int nsec = (x->tv_nsec - y->tv_nsec) / 1000000;
-    y->tv_nsec += 1000000 * nsec;
-    y->tv_sec -= nsec;
-  }
+if ((stop->tv_nsec - start->tv_nsec) < 0) {
+        result->tv_sec = stop->tv_sec - start->tv_sec - 1;
+        result->tv_nsec = stop->tv_nsec - start->tv_nsec + 1000000000;
+    } else {
+        result->tv_sec = stop->tv_sec - start->tv_sec;
+        result->tv_nsec = stop->tv_nsec - start->tv_nsec;
+    }
 
-  /* Compute the time remaining to wait.
-     tv_usec is certainly positive. */
-  result->tv_sec = x->tv_sec - y->tv_sec;
-  result->tv_nsec = x->tv_nsec - y->tv_nsec;
-
-  /* Return 1 if result is negative. */
-//    if(x->tv_sec < y->tv_sec){
-//        resul
-//    }
-}
+}*/
 
 
 module_init(hello_init);
