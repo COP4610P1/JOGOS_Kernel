@@ -50,7 +50,8 @@ Passenger *test;
 
 struct list_head passenger_list = LIST_HEAD_INIT(passenger_list);
 struct list_head passenger_queue_list = LIST_HEAD_INIT(passenger_queue_list);
-
+struct list_head *temp;
+struct list_head *dummy;
 struct elevator_thread_parameter
 {
 	int id;
@@ -68,9 +69,12 @@ int start_elevator(void)
 {
 	if (mutex_lock_interruptible(&elevator_thread.mutex) == 0)
 	{
+		printk(KERN_WARNING "enters start");
+
 		passenger_count = 0;
 		sprintf(elevator_thread.state, "IDLE");
 	}
+	printk(KERN_WARNING "leaving start");
 
 	mutex_unlock(&elevator_thread.mutex);
 
@@ -81,11 +85,13 @@ int start_elevator(void)
 extern int (*STUB_issue_request)(int, int, int);
 int issue_request(int start_floor, int destination_floor, int type)
 {
+	printk(KERN_WARNING "enters issue request");
 
 	if (mutex_lock_interruptible(&elevator_thread.mutex) == 0)
 	{
+		printk(KERN_WARNING "working on request");
 
-		queued_passenger = kmalloc(sizeof(Passenger), __GFP_RECLAIM);
+		queued_passenger = kmalloc(sizeof(Passenger) * 1, __GFP_RECLAIM);
 		//if (que == null)
 		queued_passenger->type = type;
 		queued_passenger->destination_floor = destination_floor;
@@ -103,6 +109,7 @@ int issue_request(int start_floor, int destination_floor, int type)
 		kfree(queued_passenger);
 	}
 
+	printk(KERN_WARNING "leaving request");
 	mutex_unlock(&elevator_thread.mutex);
 
 	return 0;
@@ -111,13 +118,14 @@ int issue_request(int start_floor, int destination_floor, int type)
 extern int (*STUB_stop_elevator)(void);
 int stop_elevator(void)
 {
-	if (mutex_lock_interruptible(&elevator_thread.mutex) == 0)
-	{
-		printk(KERN_NOTICE "%s: stop elevator module\n", __FUNCTION__);
-		passenger_count = 0;
-	}
+	// if (mutex_lock_interruptible(&elevator_thread.mutex) == 0)
+	// {
+	// 	printk(KERN_NOTICE "%s: stop elevator module\n", __FUNCTION__);
+	// 	passenger_count = 0;
+	// }
 
-	mutex_unlock(&elevator_thread.mutex);
+	// mutex_unlock(&elevator_thread.mutex);
+	printk(KERN_WARNING "enters stop");
 
 	return 3;
 }
@@ -189,24 +197,31 @@ void appendToMessage(char *appendToMessage)
 
 void loading_elevator(void)
 {
-	sprintf(elevator_thread.state, "LOADING");
-	if (!list_empty(&passenger_queue_list))
-	{
-		struct list_head *temp;
-		struct list_head *dummy;
-		// Passenger *p;
-		list_for_each_safe(temp, dummy, &passenger_queue_list)
-		{
-			if (passenger_count < MAXPASSENGER)
-			{
-				//test = list_entry(temp, Passenger, list);
-				////list_add_tail(&test->list, &passenger_list);
+	printk(KERN_WARNING "enters loading elevator");
 
-				//list_del(temp); //removes from linked list
+	sprintf(elevator_thread.state, "LOADING");
+	if (list_empty_careful(&passenger_queue_list) == 0)
+	{
+		if (mutex_lock_interruptible(&elevator_thread.mutex) == 0)
+		{
+			Passenger *p;
+			list_for_each_safe(temp, dummy, &passenger_queue_list)
+			{
+
+				printk(KERN_WARNING "enters the foreach loop");
+				p = list_entry(temp, Passenger, list);
+
+				list_del(temp); //removes from linked list
+
+				kfree(p);
 				queued_passenger_count--;
-				//kfree(test);
 			}
 		}
+		mutex_unlock(&elevator_thread.mutex);
+	}
+	else
+	{
+		queued_passenger_count++;
 	}
 	ssleep(1);
 	ssleep(3);
