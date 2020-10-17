@@ -28,6 +28,9 @@ static struct file_operations fops;
 static int read_p;
 char strInt[5];
 int count = 0;
+
+int elevator_move = 1; //
+
 //passenger_struct
 typedef struct passenger
 {
@@ -48,6 +51,7 @@ struct elevator_thread_parameter
 {
 	int id;
 	int cnt;
+	int level;
 	struct task_struct *kthread;
 };
 
@@ -100,20 +104,27 @@ void printElevator(void)
 	appendToMessage("\nNumber of passengers waiting: 10");
 	appendToMessage("\nNumber passengers serviced: 61");
 	//int i;
-	for (count = 10; count != 0; count--)
+	while (!kthread_should_stop())
+
+		appendToMessage("\n\n[");
+	if (count == elevator_thread.level)
 	{
-
-		appendToMessage("\n[");
-		if (true)
-		{
-			appendToMessage("*");
-		}
-		appendToMessage("] Floor ");
-		sprintf(strInt, "%d :", count);
-		appendToMessage(strInt);
-
-		//appendToMessage(" 10:")
+		appendToMessage("*");
 	}
+	else
+	{
+		appendToMessage(" ");
+	}
+
+	appendToMessage("] Floor ");
+	sprintf(strInt, "%d :", count);
+	appendToMessage(strInt);
+	sprintf(strInt, " %d ", 3);
+	appendToMessage(strInt);
+	appendToMessage(" | | X");
+}
+
+appendToMessage("\n\n( “|” for human, “X” for zombie )\n");
 }
 void appendToMessage(char *appendToMessage)
 {
@@ -127,8 +138,18 @@ int thread_run(void *data)
 
 	while (!kthread_should_stop())
 	{
-		ssleep(1);
+		ssleep(2);
 		parm->cnt++;
+
+		if (parm->level == 10)
+		{
+			elevator_move = -1;
+		}
+		else if (parm->level == 1)
+		{
+			elevator_move = 1;
+		}
+		parm->level += elevator_move;
 	}
 
 	return 0;
