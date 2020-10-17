@@ -21,11 +21,13 @@ void printElevator(void);
 void appendToMessage(char *appendToMessage);
 
 static char *message;
+static char copyMessage[ENTRY_SIZE];
 static const int MAXPASSENGER = 10;
 static const int MAXFLOOR = 10;
 static struct file_operations fops;
 static int read_p;
-
+char strInt[5];
+int count = 0;
 //passenger_struct
 typedef struct passenger
 {
@@ -90,22 +92,35 @@ int stop_elevator(void)
 
 void printElevator(void)
 {
-	sprintf(message, "Thread %d has blocked %d times\nElevator state: UP
-	\nElevator status: Infected \nCurrent floor: 4 \nNumber of passengers: 6 
-	\nNumber of passengers waiting: 10 \nNumber passengers serviced: 61");
-}
 
+	appendToMessage("\nElevator state: UP");
+	appendToMessage("\nElevator status: Infected");
+	appendToMessage("\nCurrent floor: 4");
+	appendToMessage("\nNumber of passengers: 6");
+	appendToMessage("\nNumber of passengers waiting: 10");
+	appendToMessage("\nNumber passengers serviced: 61");
+	//int i;
+	for (count = 10; count != 0; count--)
+	{
+
+		appendToMessage("\n[");
+		if (true)
+		{
+			appendToMessage("*");
+		}
+		appendToMessage("] Floor ");
+		sprintf(strInt, "%d :", count);
+		appendToMessage(strInt);
+
+		//appendToMessage(" 10:")
+	}
+}
 void appendToMessage(char *appendToMessage)
 {
-	//char *messageCopy = "message";
-	//kfree(message);
-	message = kmalloc(strlen(appendToMessage) + 2, __GFP_RECLAIM | __GFP_IO | __GFP_FS);
-	//strcat(message, appendToMessage);
-	//strcat(message, appendToMessage);
-	//sprintf(message, "Thread %d has blocked %d times\n", elevator_thread.id, elevator_thread.cnt);
+	strcat(copyMessage, appendToMessage);
 }
-/******************************************************************************/
 
+/******************************************************************************/
 int thread_run(void *data)
 {
 	struct elevator_thread_parameter *parm = data;
@@ -132,16 +147,18 @@ int thread_proc_open(struct inode *sp_inode, struct file *sp_file)
 {
 	read_p = 1;
 	message = kmalloc(sizeof(char) * ENTRY_SIZE, __GFP_RECLAIM | __GFP_IO | __GFP_FS);
-	//appendToMessage("test\n");
+
 	if (message == NULL)
 	{
 		printk(KERN_WARNING "hello_proc_open");
 		return -ENOMEM;
 	}
 
-	//sprintf(message, "tet\n");
-	//sprintf(message, "Thread %d has blocked %d times\n", elevator_thread.id, elevator_thread.cnt);
+	//appendToMessage("tesssssssst");
 	printElevator();
+	sprintf(message, copyMessage);
+
+	//sprintf(message, "Thread %d has blocked %d times\n", elevator_thread.id, elevator_thread.cnt);
 
 	return 0;
 }
