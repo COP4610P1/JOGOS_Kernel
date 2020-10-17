@@ -12,10 +12,13 @@
 MODULE_LICENSE("GPL");
 
 #define ENTRY_NAME "elevator_thread"
-#define ENTRY_SIZE 20
+#define ENTRY_SIZE 2000
 #define PERMS 0644
 #define PARENT NULL
 #define CNT_SIZE 20
+//functions
+void printElevator(void);
+void appendToMessage(char *appendToMessage);
 
 static char *message;
 static const int MAXPASSENGER = 10;
@@ -85,6 +88,22 @@ int stop_elevator(void)
 	return 3;
 }
 
+void printElevator(void)
+{
+	sprintf(message, "Thread %d has blocked %d times\nElevator state: UP
+	\nElevator status: Infected \nCurrent floor: 4 \nNumber of passengers: 6 
+	\nNumber of passengers waiting: 10 \nNumber passengers serviced: 61");
+}
+
+void appendToMessage(char *appendToMessage)
+{
+	//char *messageCopy = "message";
+	//kfree(message);
+	message = kmalloc(strlen(appendToMessage) + 2, __GFP_RECLAIM | __GFP_IO | __GFP_FS);
+	//strcat(message, appendToMessage);
+	//strcat(message, appendToMessage);
+	//sprintf(message, "Thread %d has blocked %d times\n", elevator_thread.id, elevator_thread.cnt);
+}
 /******************************************************************************/
 
 int thread_run(void *data)
@@ -112,16 +131,18 @@ void thread_init_parameter(struct elevator_thread_parameter *parm)
 int thread_proc_open(struct inode *sp_inode, struct file *sp_file)
 {
 	read_p = 1;
-
 	message = kmalloc(sizeof(char) * ENTRY_SIZE, __GFP_RECLAIM | __GFP_IO | __GFP_FS);
+	//appendToMessage("test\n");
 	if (message == NULL)
 	{
 		printk(KERN_WARNING "hello_proc_open");
 		return -ENOMEM;
 	}
 
-	sprintf(message, "Thread %d has blocked %d times\n", elevator_thread.id, elevator_thread.cnt);
-	//sprintf(message, "print elevator here \n");
+	//sprintf(message, "tet\n");
+	//sprintf(message, "Thread %d has blocked %d times\n", elevator_thread.id, elevator_thread.cnt);
+	printElevator();
+
 	return 0;
 }
 
@@ -182,6 +203,7 @@ static void elevator_module_exit(void)
 	STUB_issue_request = NULL;
 	STUB_stop_elevator = NULL;
 
+	//kfree(message);
 	kthread_stop(elevator_thread.kthread);
 	remove_proc_entry(ENTRY_NAME, NULL);
 	printk(KERN_NOTICE "Removing /proc/%s\n", ENTRY_NAME);
