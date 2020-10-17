@@ -26,7 +26,7 @@ static const int MAXPASSENGER = 10;
 static const int MAXFLOOR = 10;
 static struct file_operations fops;
 static int read_p;
-char strInt[5];
+char strInt[15];
 int count = 0;
 
 int elevator_move = 1; //
@@ -53,6 +53,7 @@ struct elevator_thread_parameter
 	int cnt;
 	int level;
 	struct task_struct *kthread;
+	struct mutex mutex;
 };
 
 struct elevator_thread_parameter elevator_thread;
@@ -96,7 +97,8 @@ int stop_elevator(void)
 
 void printElevator(void)
 {
-
+	//copyMessage = "";
+	sprintf(copyMessage, " ");
 	appendToMessage("\nElevator state: UP");
 	appendToMessage("\nElevator status: Infected");
 	appendToMessage("\nCurrent floor: 4");
@@ -104,27 +106,34 @@ void printElevator(void)
 	appendToMessage("\nNumber of passengers waiting: 10");
 	appendToMessage("\nNumber passengers serviced: 61");
 	//int i;
-	while (!kthread_should_stop())
+	count = 10;
 
-		appendToMessage("\n\n[");
-	if (count == elevator_thread.level)
+	if (mutex_lock_interruptible(&elevator_thread.mutex) == 0)
 	{
-		appendToMessage("*");
-	}
-	else
-	{
-		appendToMessage(" ");
-	}
+		while (count != 0)
+		{
 
-	appendToMessage("] Floor ");
-	sprintf(strInt, "%d :", count);
-	appendToMessage(strInt);
-	sprintf(strInt, " %d ", 3);
-	appendToMessage(strInt);
-	appendToMessage(" | | X");
-}
+			appendToMessage("\n\n[");
+			if (count == elevator_thread.level)
+			{
+				appendToMessage("*");
+			}
+			else
+			{
+				appendToMessage(" ");
+			}
 
-appendToMessage("\n\n( “|” for human, “X” for zombie )\n");
+			appendToMessage("] Floor ");
+			sprintf(strInt, "%d : ", count);
+			appendToMessage(strInt);
+			sprintf(strInt, " %d ", 3);
+			appendToMessage(strInt);
+			appendToMessage(" | | X");
+			count--;
+		}
+	}
+	mutex_unlock(&elevator_thread.mutex);
+	appendToMessage("\n\n( “|” for human, “X” for zombie )\n");
 }
 void appendToMessage(char *appendToMessage)
 {
@@ -139,17 +148,22 @@ int thread_run(void *data)
 	while (!kthread_should_stop())
 	{
 		ssleep(2);
-		parm->cnt++;
+		if (mutex_lock_interruptible(&parm->mutex) == 0)
+		{
+			parm->cnt++;
 
-		if (parm->level == 10)
-		{
-			elevator_move = -1;
+			if (parm->level == 10)
+			{
+				elevator_move = -1;
+			}
+			else if (parm->level == 1)
+			{
+				elevator_move = 1;
+			}
+			parm->level += elevator_move;
 		}
-		else if (parm->level == 1)
-		{
-			elevator_move = 1;
-		}
-		parm->level += elevator_move;
+
+		mutex_unlock(&parm->mutex);
 	}
 
 	return 0;
@@ -161,6 +175,7 @@ void thread_init_parameter(struct elevator_thread_parameter *parm)
 
 	parm->id = id++;
 	parm->cnt = 0;
+	mutex_init(&parm->mutex);
 	parm->kthread = kthread_run(thread_run, parm, "thread example %d", parm->id);
 }
 
@@ -175,11 +190,18 @@ int thread_proc_open(struct inode *sp_inode, struct file *sp_file)
 		return -ENOMEM;
 	}
 
-	//appendToMessage("tesssssssst");
+	// //appendToMessage("tesssssssst");
+	// if (mutex_lock_interruptible(&elevator_thread.mutex) == 0)
+	// {
 	printElevator();
 	sprintf(message, copyMessage);
+	// }
+	// else
+	// {
 
-	//sprintf(message, "Thread %d has blocked %d times\n", elevator_thread.id, elevator_thread.cnt);
+	// 	sprintf(message, "Thread %d has blocked %d times\n", elevator_thread.id, elevator_thread.cnt);
+	// }
+	// mutex_unlock(&elevator_thread.mutex);
 
 	return 0;
 }
@@ -244,6 +266,7 @@ static void elevator_module_exit(void)
 	//kfree(message);
 	kthread_stop(elevator_thread.kthread);
 	remove_proc_entry(ENTRY_NAME, NULL);
+	mutex_destroy(&elevator_thread.mutex);
 	printk(KERN_NOTICE "Removing /proc/%s\n", ENTRY_NAME);
 }
 
