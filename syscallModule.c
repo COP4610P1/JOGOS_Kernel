@@ -19,8 +19,8 @@ MODULE_LICENSE("GPL");
 //functions
 void printElevator(void);
 void appendToMessage(char *appendToMessage);
-void loading_elevator(void);
-void unloading_elevator(void);
+void loading_elevator(void *data);
+void unloading_elevator(void *data);
 
 static char *message;
 static char copyMessage[ENTRY_SIZE];
@@ -49,11 +49,6 @@ typedef struct passenger
 
 } Passenger;
 
-Passenger *queued_passenger;
-Passenger *test;
-struct list_head *temp;
-struct list_head *dummy;
-
 struct list_head passenger_list = LIST_HEAD_INIT(passenger_list);
 struct list_head passenger_queue_list = LIST_HEAD_INIT(passenger_queue_list);
 
@@ -69,15 +64,18 @@ struct elevator_thread_parameter
 
 struct elevator_thread_parameter elevator_thread;
 
-void loading_elevator(void)
+void loading_elevator(void *data)
 {
+	//struct elevator_thread_parameter *parm = data;
 	//stop = true;
 	printk(KERN_WARNING "enters loading elevator");
 
-	if (queued_passenger_count != 0)
+	if (queued_passenger_count != 0 && !list_empty_careful(&passenger_queue_list))
 	{
 		Passenger *p;
 		Passenger *ptest;
+		struct list_head *temp;
+		struct list_head *dummy;
 
 		list_for_each_safe(temp, dummy, &passenger_queue_list)
 		{
@@ -100,46 +98,56 @@ void loading_elevator(void)
 
 					printk(KERN_WARNING "ptest destination: %d \nstart : %d",
 						   ptest->destination_floor, ptest->start_floor);
+					printk(KERN_WARNING "kfree 3");
+
+					//kfree(ptest); //d
 				}
 
-				kfree(p); //d
+				printk(KERN_WARNING "kfree 2");
+
+				//kfree(p); //d
 			}
 		}
+
+		printk(KERN_WARNING "kfree 1");
+
+		//kfree(temp);
+		//kfree(dummy);
 	}
 	stop = false;
 
 	ssleep(1);
 }
 
-void unloading_elevator(void)
+void unloading_elevator(void *data)
 {
+	//struct elevator_thread_parameter *parm = data;
 	stop = true;
 	printk(KERN_WARNING "enters unloading elevator");
 
-	// if (passenger_count != 0)
-	// {
-	// 	Passenger *p;
+	if (passenger_count != 0 && !list_empty_careful(&passenger_list))
+	{
+		Passenger *p;
+		struct list_head *temp;
+		struct list_head *dummy;
 
-	// 	list_for_each_safe(temp, dummy, &passenger_list)
-	// 	{
-	// 		printk(KERN_WARNING "foreach looping punk ass");
-	// 		if (temp != NULL)
-	// 		{
+		list_for_each_safe(temp, dummy, &passenger_list)
+		{
+			printk(KERN_WARNING "foreach looping punk ass");
+			if (temp != NULL)
+			{
+				p = list_entry(temp, Passenger, list);
 
-	// 			p = list_entry(temp, Passenger, list);
-
-	// 			if (p->destination_floor == elevator_thread.level)
-	// 			{
-	// 				list_del(temp); //removes from linked list
-	// 				//list_move_tail(temp, &passenger_list);
-	// 				passenger_count--;
-	// 				total_passenger_service += 1;
-	// 			}
-
-	// 			kfree(p); //d
-	// 		}
-	// 	}
-	//}
+				if (p->destination_floor == elevator_thread.level)
+				{
+					list_del(temp); //removes from linked list
+					//list_move_tail(temp, &passenger_list);
+					passenger_count--;
+					total_passenger_service += 1;
+				}
+			}
+		}
+	}
 	//stop = false;
 }
 /******************************************************************************/
@@ -153,17 +161,18 @@ int thread_run(void *data)
 		ssleep(2);
 		if (stop)
 		{
-			sprintf(elevator_thread.state, "LOADING");
+			if (parm != NULL)
+				sprintf(parm->state, "LOADING");
 
-			unloading_elevator();
-			loading_elevator();
+			unloading_elevator(parm);
+			loading_elevator(parm);
 		}
-		else
+		else if (parm != NULL)
 		{
 
 			if (mutex_lock_interruptible(&parm->mutex) == 0)
 			{
-				parm->cnt++;
+				//parm->cnt++;
 
 				if (parm->level == 10)
 				{
@@ -174,31 +183,39 @@ int thread_run(void *data)
 					elevator_move = 1;
 				}
 
-				//sprintf(elevator_thread.state, "LOADING");
-
-				if (stop == false)
+				if (stop == false && parm != NULL)
 				{
 
 					parm->level += elevator_move;
-				}
 
-				if (elevator_move == 1)
-				{
-					sprintf(elevator_thread.state, "UP");
+					if (elevator_move == 1)
+					{
+						//sprintf(elevator_thread.state, "UP");
+						sprintf(parm->state, "UP");
+					}
+					else if (elevator_move == -1)
+					{
+						sprintf(parm->state, "DOWN");
+					}
 				}
-				else if (elevator_move == -1)
-				{
-					sprintf(elevator_thread.state, "DOWN");
-				}
-
 				printk(KERN_WARNING "level ++");
 				stop = true;
 			}
 
 			mutex_unlock(&parm->mutex);
 		}
+		else
+		{
+			break;
+		}
 	}
 
+	if (parm != NULL)
+	{
+		printk(KERN_WARNING "kfree 66");
+
+		kfree(parm);
+	}
 	return 0;
 }
 
@@ -209,7 +226,7 @@ void thread_init_parameter(struct elevator_thread_parameter *parm)
 
 	parm->id = id++;
 	parm->cnt = 0;
-	sprintf(elevator_thread.state, "OFFLINE");
+	sprintf(parm->state, "OFFLINE");
 	mutex_init(&parm->mutex);
 	parm->kthread = kthread_run(thread_run, parm, "thread example %d", parm->id);
 }
@@ -241,15 +258,20 @@ int start_elevator(void)
 extern int (*STUB_issue_request)(int, int, int);
 int issue_request(int start_floor, int destination_floor, int type)
 {
-
+	Passenger *queued_passenger;
+	Passenger *test;
 	stop = true;
 
-	//queued_passenger_count++;
 	printk(KERN_WARNING "enters issue request start %d, \ndes %d \ntype %d",
 		   start_floor, destination_floor, type);
 
-	queued_passenger = kmalloc(sizeof(Passenger) * 1, __GFP_RECLAIM);
-	//if (que == null)
+	queued_passenger = kmalloc(sizeof(Passenger), __GFP_RECLAIM);
+	if (queued_passenger == NULL)
+	{
+		printk(KERN_WARNING "hello_proc_open");
+		return -ENOMEM;
+	}
+
 	queued_passenger->type = type;
 	queued_passenger->destination_floor = destination_floor;
 	queued_passenger->start_floor = start_floor;
@@ -260,7 +282,7 @@ int issue_request(int start_floor, int destination_floor, int type)
 	test = list_last_entry(&passenger_queue_list, Passenger, list);
 
 	printk(KERN_WARNING "enters issue request start %d, \ndes %d \ntype %d",
-		   test->start_floor, test->destination_floor, test->t0ype);
+		   test->start_floor, test->destination_floor, test->type);
 
 	return 0;
 }
@@ -276,10 +298,6 @@ int stop_elevator(void)
 
 void printElevator(void)
 {
-
-	// stop = true;
-	// if (mutex_lock_interruptible(&elevator_thread.mutex) == 0)
-	// {
 	sprintf(copyMessage, " ");
 	appendToMessage("\nElevator state: ");
 
@@ -324,9 +342,6 @@ void printElevator(void)
 	}
 	appendToMessage("\n\n( “|” for human, “X” for zombie )\n");
 	sprintf(message, copyMessage);
-	// // }
-	// mutex_unlock(&elevator_thread.mutex);
-	// stop = false;
 }
 
 void appendToMessage(char *appendToMessage)
@@ -404,15 +419,22 @@ static void elevator_module_exit(void)
 {
 
 	stop = true;
+	printk(KERN_WARNING "remove proc");
+	remove_proc_entry(ENTRY_NAME, NULL);
+	printk(KERN_WARNING "kfree 44");
+	if (elevator_thread.kthread != NULL)
+		kthread_stop(elevator_thread.kthread);
+
+	printk(KERN_WARNING "remove mutex");
+	mutex_destroy(&elevator_thread.mutex);
 
 	STUB_start_elevator = NULL;
 	STUB_issue_request = NULL;
 	STUB_stop_elevator = NULL;
 
-	//kfree(message);
-	kthread_stop(elevator_thread.kthread);
-	remove_proc_entry(ENTRY_NAME, NULL);
-	mutex_destroy(&elevator_thread.mutex);
+	// kfree(test);
+	// kfree(queued_passenger);
+	// kfree(message);
 	printk(KERN_NOTICE "Removing /proc/%s\n", ENTRY_NAME);
 }
 
