@@ -1,682 +1,505 @@
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/linkage.h>
 #include <linux/init.h>
+#include <linux/module.h>
 #include <linux/proc_fs.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/kthread.h>
-#include <linux/mutex.h>
-#include <linux/printk.h>
-#include <linux/list.h>
-#include <linux/slab.h>
 #include <linux/delay.h>
+#include <linux/sched.h>
+#include <linux/mutex.h>
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Elevator Scheduler: Humans v. Zombies");
 
-#define MODULE_NAME "elevator2"
-#define MODULE_PERMISSIONS 0644
-#define MODULE_PARENT NULL
+#define ENTRY_NAME "elevator3"
+#define ENTRY_SIZE 2000
+#define PERMS 0644
+#define PARENT NULL
+#define CNT_SIZE 20
+//functions
+void printElevator(void);
+void appendToMessage(char *appendToMessage);
+void loading_elevator(void *data);
+void unloading_elevator(void *data);
+void get_floor_status(int floor);
 
-#define IDLE 0
-#define UP 1
-#define DOWN 2
-#define LOADING 3
-#define OFFLINE 4
+static char *message;
+static char copyMessage[ENTRY_SIZE];
+static const int MAXPASSENGER = 10;
+static const int MAXFLOOR = 10;
+static struct file_operations fops;
+static int read_p;
+char strInt[15];
+int count = 0;
+int passenger_count = 0;
+int queued_passenger_count = 0;
+int total_passenger_service = 0;
+int waiting_on_floor[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-#define NUMFLOORS 10
+int elevator_move = 1;
 
-#define MALLOCFLAGS (__GFP_RECLAIM | __GFP_IO | __GFP_FS)
+bool stop = false;
+bool service_start = false;
+bool elevator_loading = false;
+bool elevator_infected = false;
 
-void elevator_syscalls_create(void);
-void elevator_syscalls_remove(void);
-void initQueue(void);
-void queuePassenger(int type, int start, int end);
-void PrintQueue(void);
-char* queueToString(void);
-int passengWeights(int type);
-int passengerQueueSize(int floor);
-int passengerQueueWeight(int floor);
-int elevatorMove(int floor);
-int elevWeight(void);
-int elevListSize(void);
-int elevatorRun(void *data);
-int ifLoad(void);
-int ifUnload(void);
-void loadPassengers(int floor);
-void unloadPassengers(void);
-
-struct queueEntries
+//passenger_struct
+typedef struct passenger
 {
+	int type;
+	int destination_floor;
+	int start_floor;
 	struct list_head list;
-	int m_type;
-	int m_startFloor;
-	int m_destFloor;
+
+} Passenger;
+
+struct list_head passenger_list = LIST_HEAD_INIT(passenger_list);
+struct list_head passenger_queue_list = LIST_HEAD_INIT(passenger_queue_list);
+
+struct elevator_thread_parameter
+{
+	int id;
+	int cnt;
+	int level;
+	char state[8];
+	struct task_struct *kthread;
+	struct mutex mutex;
 };
 
-struct list_head passengerQueue[NUMFLOORS];
-struct list_head elevList;
+struct elevator_thread_parameter elevator_thread;
 
-
-int stop_s;
-int mainDirection;
-int nextDirection;
-int currFloor;
-int nextFloor;
-int numPassengers;
-int numWeight;
-int waitPassengers;
-int passengersServiced;
-int passengersServFloor[NUMFLOORS];
-char status[10];
-
-char *str;
-int i;
-int rp;
-char *message;
-
-struct mutex passengerQueueMutex;
-struct mutex elevatorListMutex;
-
-struct task_struct* elevator_thread;
-
-static struct file_operations fileOperations;
-
-int OpenModule(struct inode * sp_inode, struct file *sp_file)
+void loading_elevator(void *data)
 {
-	printk(KERN_NOTICE "OpenModule Called\n");
-	rp = 1;
-	message = kmalloc(sizeof(char) * 2048, __GFP_RECLAIM | __GFP_IO | __GFP_FS);
-	if (message == NULL)
+	struct elevator_thread_parameter *parm = data;
+	//stop = true;
+	printk(KERN_WARNING "enters loading elevator");
+
+	if (queued_passenger_count != 0 && !list_empty_careful(&passenger_queue_list))
 	{
-		printk("Error: OpenModule");
-		return -ENOMEM;
+		Passenger *p;
+		Passenger *ptest;
+		struct list_head *temp;
+		struct list_head *dummy;
+
+		list_for_each_safe(temp, dummy, &passenger_queue_list)
+		{
+			if (passenger_count < 10)
+			{
+				printk(KERN_WARNING "foreach looping punk ass");
+				if (temp != NULL)
+				{
+					p = list_entry(temp, Passenger, list);
+
+					printk(KERN_WARNING "p destination: %d \nstart : %d",
+						   p->destination_floor, p->start_floor);
+
+					if (p->start_floor == elevator_thread.level)
+					{
+
+						elevator_loading = true;
+						sprintf(parm->state, "LOADING");
+						printk(KERN_WARNING "p2 destination: %d \nstart : %d",
+							   p->destination_floor, p->start_floor);
+						if (p->type == 1)
+						{
+
+							elevator_infected = true;
+						}
+						if ((p->type == 0 && !elevator_infected) || p->type == 1)
+						{
+							list_move(temp, &passenger_list);
+							passenger_count++;
+							queued_passenger_count--;
+							waiting_on_floor[p->start_floor - 1] -= 1;
+						}
+
+						ptest = list_last_entry(&passenger_list, Passenger, list);
+
+						printk(KERN_WARNING "ptest destination: %d \nstart : %d",
+							   ptest->destination_floor, ptest->start_floor);
+						printk(KERN_WARNING "kfree 3");
+					}
+
+					printk(KERN_WARNING "kfree 2");
+				}
+			}
+		}
+
+		printk(KERN_WARNING "kfree 1");
+	}
+	stop = false;
+}
+
+void unloading_elevator(void *data)
+{
+	struct elevator_thread_parameter *parm = data;
+	stop = true;
+
+	printk(KERN_WARNING "enters unloading elevator");
+
+	if (passenger_count != 0 && !list_empty_careful(&passenger_list))
+	{
+		Passenger *p;
+		struct list_head *temp;
+		struct list_head *dummy;
+
+		list_for_each_safe(temp, dummy, &passenger_list)
+		{
+			printk(KERN_WARNING "foreach looping punk ass");
+			if (temp != NULL)
+			{
+				p = list_entry(temp, Passenger, list);
+
+				if (p->destination_floor == elevator_thread.level)
+				{
+					sprintf(parm->state, "LOADING");
+					elevator_loading = true;
+					list_del(temp); //removes from linked list
+					passenger_count--;
+					total_passenger_service += 1;
+				}
+			}
+		}
+	}
+
+	if (passenger_count == 0)
+	{
+		elevator_infected = false;
+	}
+}
+/******************************************************************************/
+int thread_run(void *data)
+{
+	struct elevator_thread_parameter *parm = data;
+
+	while (!kthread_should_stop())
+	{
+		if(queued_passenger_count == 0 && passenger_count == 0)
+		{
+			sprintf(elevator_thread.state, "IDLE");
+		}
+		if(queued_passenger_count > 0 || passenger_count > 0)
+		{
+			ssleep(2);
+			if (stop)
+			{
+				// if (parm != NULL)
+				// sprintf(parm->state, "LOADING");
+
+				unloading_elevator(parm);
+				loading_elevator(parm);
+			}
+			else if (parm != NULL)
+			{
+
+				if (mutex_lock_interruptible(&parm->mutex) == 0)
+				{
+					//parm->cnt++;
+
+					if (parm->level == 10)
+					{
+						elevator_move = -1;
+					}
+					else if (parm->level == 1)
+					{
+						elevator_move = 1;
+					}
+
+					if (stop == false && parm != NULL)
+					{
+						if (elevator_loading)
+						{
+							ssleep(1);
+							elevator_loading = false;
+						}
+
+						parm->level += elevator_move;
+
+						if (elevator_move == 1)
+						{
+							//sprintf(elevator_thread.state, "UP");
+							sprintf(parm->state, "UP");
+						}
+						else if (elevator_move == -1)
+						{
+							sprintf(parm->state, "DOWN");
+						}
+					}
+					printk(KERN_WARNING "level ++");
+					stop = true;
+				}
+
+				mutex_unlock(&parm->mutex);
+			}
+			else
+			{
+				break;
+			}
+		}
+	}
+
+	if (parm != NULL)
+	{
+		printk(KERN_WARNING "kfree 66");
+
+		kfree(parm);
 	}
 	return 0;
 }
 
-char *directionToString (int mainDirection)
+void thread_init_parameter(struct elevator_thread_parameter *parm)
 {
-	static char str[32];
 
-	switch (mainDirection)
-	{
-		case OFFLINE:
-			sprintf(str, "OFFLINE");
-			break;
-		case IDLE:
-                        sprintf(str, "IDLE");
-                        break;
-                case UP:
-                        sprintf(str, "UP");
-                        break;
-                case DOWN:
-                        sprintf(str, "DOWN");
-                        break;
-                case LOADING:
-                        sprintf(str, "LOADING");
-                        break;
-                default:
-                        sprintf(str, "ERROR");
-                        break;
-	}
-	return str;
-}
+	static int id = 1;
 
-ssize_t ReadModule(struct file *sp_file, char __user *buff, size_t size, loff_t *offset)
-{
-	int n;
-	numPassengers = elevListSize();
-	numWeight = elevWeight();
-	n = numWeight % 1;
-	if (n)
-	{
-		//sprintf(message, "Main elevator direction: %s \nCurrent floor: %d \nNext floor: %d \nCurrent passengers: %d \nCurrent Weight: %d.5 units\nPassengers serviced: %d \nPassengers waiting: %s \n",
-		//directionToString(mainDirection), currFloor, nextFloor, numWeight, numPassengers, passengersServiced, queueToString());
-
-		//sprintf(message, "Elevator state: %s \nElevator status:  \nCurrent floor: %d \nNumber of passengers: %d \nNumber of passengers waiting: %s \nNumber of Passengers serviced: %d  \n",
-		//directionToString(mainDirection), currFloor, numWeight, queueToString(), passengersServiced);
-
-		sprintf(message, "Elevator state: %s \nElevator status: \nCurrent floor: %d \nNumber of passengers: %d \nNumber of passengers serviced: %d \nNumber of passengers waiting: %s \n",
-		directionToString(mainDirection), currFloor, numWeight, passengersServiced, queueToString());
-	}
-	else
-	{
-		//sprintf(message, "Main elevator direction: %s \nCurrent floor: %d \nNext floor: %d \nCurrent passengers: %d\nCurrent Weight: %d units\nPassengers serviced %d\nPassengers waiting: %s \n",
-		//directionToString(mainDirection), currFloor, nextFloor, numWeight, numPassengers, passengersServiced, queueToString());
-
-		//sprintf(message, "Elevator state: %s \nElevator status:  \nCurrent floor: %d \nNumber of passengers: %d \nNumber of passengers waiting: %s \nNumber of passengers serviced: %d \n",
-		//directionToString(mainDirection), currFloor, numWeight, queueToString(), passengersServiced);
-
-		sprintf(message, "Elevator state: %s \nElevator status: \nCurrent floor: %d \nNumber of passengers: %d \nNumber of passengers serviced: %d \nNumber of passengers waiting: %s \n",
-		directionToString(mainDirection), currFloor, numWeight, passengersServiced, queueToString());
-	}
-	rp = !rp;
-	if (rp)
-	{
-		return 0;
-	}
-
-	printk(KERN_NOTICE "ReadModule() called.\n");
-	copy_to_user(buff, message, strlen(message));
-
-	return strlen(message);
-}
-
-int ReleaseModule(struct inode *sp_inode, struct file *sp_file)
-{
-	printk(KERN_NOTICE "ReleaseModule() called.\n");
-	kfree(message);
-	return 0;
-}
-
-static int InitializeModule(void)
-{
-	printk(KERN_NOTICE "Creating /proc/%s.\n", MODULE_NAME);
-
-	fileOperations.open = OpenModule;
-	fileOperations.read = ReadModule;
-	fileOperations.release = ReleaseModule;
-
-	mainDirection = OFFLINE;
-	nextDirection = UP;
-	stop_s = 0;
-	currFloor = 1;
-	nextFloor = 1;
-	numPassengers = 0;
-	numWeight = 0;
-	waitPassengers = 0;
-	for (i = 0; i < 10; i++)
-	{
-		passengersServFloor[i] = 0;
-	}
-	initQueue();
-	elevator_syscalls_create();
-	mutex_init(&passengerQueueMutex);
-	mutex_init(&elevatorListMutex);
-	elevator_thread = kthread_run(elevatorRun, NULL, "Elevator Thread");
-	if(IS_ERR(elevator_thread))
-	{
-		printk("Error: ElevatorRun\n");
-		return PTR_ERR(elevator_thread);
-	}
-	if(!proc_create(MODULE_NAME, MODULE_PERMISSIONS, NULL, &fileOperations))
-	{
-		printk("Error: proc_create\n");
-		remove_proc_entry(MODULE_NAME, NULL);
-		return -ENOMEM;
-	}
-	return 0;
-}
-
-static void ExitModule(void)
-{
-	int r;
-	remove_proc_entry(MODULE_NAME, NULL);
-	elevator_syscalls_remove();
-	printk(KERN_NOTICE "Removing /proc/%s.\n", MODULE_NAME);
-	r = kthread_stop(elevator_thread);
-	if(r != -EINTR)
-	{
-		printk("Elevator stopped...\n");
-	}
+	parm->id = id++;
+	parm->cnt = 0;
+	//sprintf(parm->state, "OFFLINE");
+	mutex_init(&parm->mutex);
+	parm->kthread = kthread_run(thread_run, parm, "thread example %d", parm->id);
 }
 
 extern int (*STUB_start_elevator)(void);
 int start_elevator(void)
 {
-	if(stop_s)
+
+	if (!service_start)
 	{
-		stop_s = 0;
-		printk("stop_s\n");
-		return 0;
+		stop = false;
+
+		printk(KERN_NOTICE "%s: start elevator module\n", __FUNCTION__);
+		sprintf(elevator_thread.state, "IDLE");
+		elevator_thread.level = 1;
+		thread_init_parameter(&elevator_thread);
+		if (IS_ERR(elevator_thread.kthread))
+		{
+			printk(KERN_WARNING "error spawning thread");
+			remove_proc_entry(ENTRY_NAME, NULL);
+			return PTR_ERR(elevator_thread.kthread);
+		}
 	}
-	else if (mainDirection == OFFLINE)
-	{
-		printk("Starting elevator\n");
-		mainDirection = IDLE;
-		return 0;
-	}
-	else
-	{
-		return 1;
-	}
+
+	service_start = true;
+	return 1;
 }
 
-extern int (*STUB_issue_request)(int,int,int);
-int issue_request(int start_floor, int destination_floor, int passenger_type)
+extern int (*STUB_issue_request)(int, int, int);
+int issue_request(int start_floor, int destination_floor, int type)
 {
-	printk("New request: %d, %d => %d\n", start_floor, destination_floor, passenger_type);
-	if (start_floor == destination_floor)
+	Passenger *queued_passenger;
+	Passenger *test;
+	stop = true;
+
+	printk(KERN_WARNING "enters issue request start %d, \ndes %d \ntype %d",
+		   start_floor, destination_floor, type);
+
+	queued_passenger = kmalloc(sizeof(Passenger), __GFP_RECLAIM);
+	if (queued_passenger == NULL)
 	{
-		passengersServiced++;
-		passengersServFloor[start_floor - 1]++;
+		printk(KERN_WARNING "hello_proc_open");
+		return -ENOMEM;
 	}
-	else
-	{
-		queuePassenger(passenger_type, start_floor, destination_floor);
-	}
+
+	queued_passenger->type = type;
+	queued_passenger->destination_floor = destination_floor;
+	queued_passenger->start_floor = start_floor;
+
+	list_add_tail(&queued_passenger->list, &passenger_queue_list);
+	queued_passenger_count++;
+	waiting_on_floor[start_floor - 1] += 1;
+
+	test = list_last_entry(&passenger_queue_list, Passenger, list);
+
+	printk(KERN_WARNING "enters issue request start %d, \ndes %d \ntype %d",
+		   test->start_floor, test->destination_floor, test->type);
+
 	return 0;
 }
 
 extern int (*STUB_stop_elevator)(void);
 int stop_elevator(void)
 {
-	printk("Stopping elevator\n");
-	if (stop_s == 1)
+	if(service_start)
 	{
 		return 1;
 	}
-	stop_s = 1;
+	service_start = true;
+
 	return 0;
 }
 
-void elevator_syscalls_create(void)
+void get_floor_status(int floor)
 {
-	STUB_start_elevator = &(start_elevator);
-	STUB_issue_request = &(issue_request);
-	STUB_stop_elevator = &(stop_elevator);
-}
 
-void elevator_syscalls_remove(void)
-{
-        STUB_start_elevator = NULL;
-        STUB_issue_request = NULL;
-        STUB_stop_elevator = NULL;
-}
+	Passenger *p;
+	struct list_head *temp;
 
-void initQueue(void)
-{
-	int i = 0;
-	while (i < NUMFLOORS)
+	list_for_each(temp, &passenger_queue_list)
 	{
-		INIT_LIST_HEAD(&passengerQueue[i]);
-		i++;
-	}
-	INIT_LIST_HEAD(&elevList);
-}
-
-void queuePassenger(int type, int start, int end)
-{
-	struct queueEntries *newEntry;
-	newEntry = kmalloc(sizeof(struct queueEntries), MALLOCFLAGS);
-	newEntry->m_type = type;
-        newEntry->m_startFloor = start;
-        newEntry->m_destFloor = end;
-	mutex_lock_interruptible(&passengerQueueMutex);
-	list_add_tail(&newEntry->list, &passengerQueue[start - 1]);
-	mutex_unlock(&passengerQueueMutex);
-	PrintQueue();
-}
-
-void PrintQueue(void)
-{
-	struct list_head *pos;
-	struct queueEntries* entry;
-	int currentPos = 0;
-	int i = 0;
-	printk("Passenger Queue:\n");
-	mutex_lock_interruptible(&passengerQueueMutex);
-	while (i < NUMFLOORS)
-	{
-		printk("Floor: %d\n", i+1);
-		list_for_each(pos, &passengerQueue[i])
+		p = list_entry(temp, Passenger, list);
+		if (floor == p->start_floor)
 		{
-			entry = list_entry(pos, struct queueEntries, list);
-			printk("Queue pos: %d\nType: %d\nStart Floor: %d\nDest Floor: %d\n", currentPos, entry->m_type, entry->m_startFloor, entry->m_destFloor);
-			++currentPos;
+			if (p->type == 0)
+			{
+
+				appendToMessage("|");
+			}
+			else
+			{
+
+				appendToMessage("X");
+			}
 		}
-		i++;
 	}
-	mutex_unlock(&passengerQueueMutex);
-	printk("\n");
 }
-
-char* queueToString(void)
+void printElevator(void)
 {
-	static char str1[2048];
-	static char str2[256];
-	int passQueueSize;
-	int passQueueWeight;
-	int passQueueServed;
-	int i = 11, odd = 0;
-	//sprintf(str1, "\n\nIn the passenger queue:\n");
-	while (i > 0)
+	//int i = 0;
+	sprintf(copyMessage, " ");
+	appendToMessage("\nElevator state: ");
+
+	appendToMessage(elevator_thread.state);
+
+	if (elevator_infected)
 	{
-		//sprintf(str2, "\nFloor: %d", i-1);
-		//strcat(str1, str2);
-		passQueueSize = passengerQueueSize(i);
-		passQueueWeight = passengerQueueWeight(i);
-		passQueueServed = passengersServFloor[i-1];
-		odd = passQueueWeight % 2;
-		if(odd)
-		{
-			//sprintf(str2, "Numeber of passengers in the queue: %d\nWeight of the queue: %d.5\nPassengers served: %d\n", passQueueSize, passQueueWeight/2, passQueueServed);
-			sprintf(str2, "[ ]");
-			strcat(str1, str2);
-		}
-		else
-		{
-			//sprintf(str2, "Numeber of passengers in the queue: %d\nWeight of the queue: %d\nPassengers served: %d\n", passQueueSize, passQueueWeight/2, passQueueServed);
-			sprintf(str2, "[ ]");
-			strcat(str1, str2);
-		}
-		sprintf(str2, "\nFloor: %d", i-1);
-		strcat(str1, str2);
-		i++;
-	}
-	strcat(str1, "\n");
-	return str1;
-}
-
-int passengWeights(int type)
-{
-	if (type == 0)
-		return 2;
-	else if (type == 1)
-		return 1;
-	else if (type == 2 || type == 3)
-		return 4;
-	else
-		return 0;
-}
-
-int elevatorMove(int floor)
-{
-	if (floor == currFloor)
-	{
-		return 0;
+		appendToMessage("\nElevator status: Infected");
 	}
 	else
 	{
-		printk("Now moving floor to %d\n", floor);
-		ssleep(2);
-		currFloor = floor;
-		return 1;
+		appendToMessage("\nElevator status: Not Infected");
 	}
+	appendToMessage("\nCurrent floor: ");
+	sprintf(strInt, "%d ", elevator_thread.level);
+	appendToMessage(strInt);
+	appendToMessage("\nNumber of passengers: ");
+	sprintf(strInt, "%d ", passenger_count);
+	appendToMessage(strInt);
+	appendToMessage("\nNumber of passengers waiting: ");
+	sprintf(strInt, "%d ", queued_passenger_count);
+	appendToMessage(strInt);
+	appendToMessage("\nNumber passengers serviced: ");
+	sprintf(strInt, "%d ", total_passenger_service);
+	appendToMessage(strInt);
+
+	count = 10;
+
+	while (count != 0)
+	{
+		// stop = true;
+		appendToMessage("\n\n[");
+		if (count == elevator_thread.level)
+		{
+			appendToMessage("*");
+		}
+		else
+		{
+			appendToMessage(" ");
+		}
+
+		appendToMessage("] Floor ");
+		sprintf(strInt, "%d : ", count);
+		appendToMessage(strInt);
+		sprintf(strInt, " %d ", waiting_on_floor[count - 1]);
+		appendToMessage(strInt);
+		get_floor_status(count);
+		count--;
+	}
+	appendToMessage("\n\n( “|” for human, “X” for zombie )\n");
+	sprintf(message, copyMessage);
 }
 
-int elevatorRun(void *data)
+void appendToMessage(char *appendToMessage)
 {
-	while(!kthread_should_stop())
+
+	strcat(copyMessage, appendToMessage);
+}
+
+int thread_proc_open(struct inode *sp_inode, struct file *sp_file)
+{
+
+	read_p = 1;
+
+	message = kmalloc(sizeof(char) * ENTRY_SIZE, __GFP_RECLAIM | __GFP_IO | __GFP_FS);
+
+	if (message == NULL)
 	{
-		switch(mainDirection)
-		{
-			case OFFLINE:
-			break;
-
-			case IDLE:
-			nextDirection = UP;
-			if(ifLoad() && !stop_s)
-			{
-				mainDirection = LOADING;
-			}
-			else
-			{
-				mainDirection = UP;
-				nextFloor = currFloor + 1;
-			}
-			break;
-
-			case UP:
-			elevatorMove(nextFloor);
-			if (currFloor == 10)
-			{
-				nextDirection = DOWN;
-				mainDirection = DOWN;
-			}
-			if ((ifLoad() && !stop_s) || ifUnload())
-			{
-				mainDirection = LOADING;
-			}
-			else if (currFloor == 10)
-			{
-				nextFloor = currFloor - 1;
-			}
-			else
-			{
-				nextFloor = currFloor + 1;
-			}
-			break;
-
-			case DOWN:
-			elevatorMove(nextFloor);
-			if (currFloor == 1)
-                        {
-                                nextDirection = UP;
-                                mainDirection = UP;
-                        }
-                        if (stop_s && !elevListSize() && currFloor == 1)
-                        {
-                                mainDirection = OFFLINE;
-				stop_s = 0;
-				nextDirection = UP;
-                        }
-			else if ((ifLoad() && !stop_s) || ifUnload())
-                        {
-                                mainDirection = LOADING;
-                        }
-                        else if (currFloor == 1)
-                        {
-                                nextFloor = currFloor + 1;
-                        }
-                        else
-                        {
-                                nextFloor = currFloor - 1;
-                        }
-                        break;
-
-			case LOADING:
-			ssleep(1);
-			unloadPassengers();
-			while (ifLoad() && !stop_s)
-			{
-				loadPassengers(currFloor);
-			}
-			mainDirection = nextDirection;
-			if (mainDirection == DOWN)
-			{
-				if (currFloor == 1)
-				{
-					nextDirection = UP;
-					mainDirection = UP;
-					nextFloor = currFloor + 1;
-				}
-				else
-				{
-					nextFloor = currFloor - 1;
-				}
-			}
-			else
-			{
-				if (currFloor == 10)
-				{
-					nextDirection = DOWN;
-					mainDirection = DOWN;
-					nextFloor = currFloor - 1;
-				}
-				else
-				{
-					nextFloor = currFloor + 1;
-				}
-			}
-			break;
-		}
+		printk(KERN_WARNING "hello_proc_open");
+		return -ENOMEM;
 	}
+
+	printElevator();
+
 	return 0;
 }
 
-int ifLoad(void)
+ssize_t thread_proc_read(struct file *sp_file, char __user *buf, size_t size, loff_t *offset)
 {
-	struct queueEntries *entry;
-	struct list_head *pos;
-	int limit = elevListSize();
-	if (limit == 8)
-	{
+
+	int len = strlen(message);
+
+	read_p = !read_p;
+	if (read_p)
 		return 0;
-	}
-	mutex_lock_interruptible(&passengerQueueMutex);
-	list_for_each(pos, &passengerQueue[currFloor - 1])
-	{
-		entry = list_entry(pos, struct queueEntries, list);
-		if ((passengWeights(entry->m_type) + elevWeight() <= 16) && ((entry->m_destFloor > currFloor && nextDirection == UP) || (entry->m_destFloor < currFloor && nextDirection == DOWN)))
-		{
-			mutex_unlock(&passengerQueueMutex);
-			return 1;
-		}
-	}
-	mutex_unlock(&passengerQueueMutex);
+
+	copy_to_user(buf, message, len);
+
+	return len;
+}
+
+int thread_proc_release(struct inode *sp_inode, struct file *sp_file)
+{
+
+	kfree(message);
 	return 0;
 }
 
-int ifUnload(void)
+/******************************************************************************/
+
+static int elevator_module_init(void)
 {
-	struct queueEntries *entry;
-        struct list_head *pos;
-	mutex_lock_interruptible(&elevatorListMutex);
-	list_for_each(pos, &elevList)
+
+	STUB_start_elevator = start_elevator;
+	STUB_issue_request = issue_request;
+	STUB_stop_elevator = stop_elevator;
+
+	fops.open = thread_proc_open;
+	fops.read = thread_proc_read;
+	fops.release = thread_proc_release;
+
+	if (!proc_create(ENTRY_NAME, PERMS, NULL, &fops))
 	{
-		entry = list_entry(pos, struct queueEntries, list);
-		if(entry->m_destFloor == currFloor)
-		{
-			mutex_unlock(&elevatorListMutex);
-			return 1;
-		}
+		printk(KERN_WARNING "thread_init");
+		remove_proc_entry(ENTRY_NAME, NULL);
+		return -ENOMEM;
 	}
-	mutex_unlock(&elevatorListMutex);
+	sprintf(elevator_thread.state, "OFFLINE");
+
 	return 0;
 }
 
-void unloadPassengers(void)
+module_init(elevator_module_init);
+
+static void elevator_module_exit(void)
 {
-	struct queueEntries *entry;
-        struct list_head *pos, *q;
-        mutex_lock_interruptible(&elevatorListMutex);
-        list_for_each_safe(pos, q, &elevList)
-        {
-                entry = list_entry(pos, struct queueEntries, list);
-                if(entry->m_destFloor == currFloor)
-                {
-			passengersServiced++;
-			passengersServFloor[entry->m_startFloor - 1]++;
-			list_del(pos);
-			kfree(entry);
-		}
-	}
-	mutex_unlock(&elevatorListMutex);
+
+	stop = true;
+	printk(KERN_WARNING "remove proc");
+	remove_proc_entry(ENTRY_NAME, NULL);
+	printk(KERN_WARNING "kfree 44");
+	if (elevator_thread.kthread != NULL)
+		kthread_stop(elevator_thread.kthread);
+
+	printk(KERN_WARNING "remove mutex");
+	mutex_destroy(&elevator_thread.mutex);
+
+	STUB_start_elevator = NULL;
+	STUB_issue_request = NULL;
+	STUB_stop_elevator = NULL;
+
+	// kfree(test);
+	// kfree(queued_passenger);
+	// kfree(message);
+	printk(KERN_NOTICE "Removing /proc/%s\n", ENTRY_NAME);
 }
 
-void loadPassengers(int floor)
-{
-	int weight = elevWeight();
-	struct queueEntries *entry;
-	struct list_head *pos, *q;
-	int i = floor - 1;
-
-	if (floor > 10 || floor < 1)
-        {
-                printk(KERN_NOTICE "Error: Invalid Floor\n");
-                return;
-        }
-
-        mutex_lock_interruptible(&passengerQueueMutex);
-        list_for_each_safe(pos, q, &passengerQueue[i])
-        {
-                entry = list_entry(pos, struct queueEntries, list);
-		if ((entry->m_startFloor == floor) && ((passengWeights(entry->m_type) + weight) <= 16))
-		{
-			struct queueEntries *n;
-			n = kmalloc(sizeof(struct queueEntries), MALLOCFLAGS);
-			n->m_type = entry->m_type;
-			n->m_startFloor = entry->m_startFloor;
-			n->m_destFloor = entry->m_destFloor;
-			mutex_lock_interruptible(&elevatorListMutex);
-			list_add_tail(&n->list, &elevList);
-			list_del(pos);
-			kfree(entry);
-			mutex_unlock(&elevatorListMutex);
-			mutex_unlock(&passengerQueueMutex);
-			return;
-		}
-	}
-	mutex_unlock(&passengerQueueMutex);
-}
-
-int passengerQueueWeight(int floor)
-{
-	struct queueEntries *entry;
-        struct list_head *pos;
-	int weight = 0;
-	mutex_lock_interruptible(&passengerQueueMutex);
-	list_for_each(pos, &passengerQueue[floor - 1])
-	{
-		entry = list_entry(pos, struct queueEntries, list);
-		weight += passengWeights(entry->m_type);
-	}
-	mutex_unlock(&passengerQueueMutex);
-	return weight;
-}
-
-int passengerQueueSize(int floor)
-{
-	struct queueEntries *entry;
-        struct list_head *pos;
-        int i = 0;
-        mutex_lock_interruptible(&passengerQueueMutex);
-	list_for_each(pos, &passengerQueue[floor - 1])
-	{
-		entry = list_entry(pos, struct queueEntries, list);
-		if (entry->m_type == 2)
-		{
-			i += 2;
-		}
-		else
-		{
-			i++;
-		}
-	}
-	mutex_unlock(&passengerQueueMutex);
-	return i;
-}
-
-int elevWeight(void)
-{
-        struct queueEntries *entry;
-        struct list_head *pos;
-        int weight = 0;
-	mutex_lock_interruptible(&elevatorListMutex);
-	list_for_each(pos, &elevList)
-	{
-		entry = list_entry(pos, struct queueEntries, list);
-		weight += passengWeights(entry->m_type);
-	}
-	mutex_unlock(&elevatorListMutex);
-	return weight;
-}
-
-int elevListSize(void)
-{
-	struct queueEntries *entry;
-	struct list_head *pos;
-	int i = 0;
-	mutex_lock_interruptible(&elevatorListMutex);
-	list_for_each(pos, &elevList)
-        {
-                entry = list_entry(pos, struct queueEntries, list);
-		if (entry->m_type == 2)
-		{
-			i += 2;
-		}
-		else
-		{
-			i++;
-		}
-	}
-	mutex_unlock(&elevatorListMutex);
-        return i;
-}
-
-
-module_init(InitializeModule);
-module_exit(ExitModule);
+module_exit(elevator_module_exit);
