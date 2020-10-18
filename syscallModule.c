@@ -71,20 +71,27 @@ void loading_elevator(void)
 	stop = true;
 	printk(KERN_WARNING "enters loading elevator");
 
-	list_for_each_safe(temp, dummy, &passenger_queue_list)
+	if (queued_passenger_count != 0)
 	{
-		printk(KERN_WARNING "foreach looping punk ass");
-		//printk(KERN_WARNING "foreach looping punk ass %d", temp->);
-		//if(temp->next)
-		//return;
 
-		printk(KERN_WARNING "afteer if statement foreach looping punk ass");
-		queued_passenger_count--;
+		list_for_each_safe(temp, dummy, &passenger_queue_list)
+		{
+			printk(KERN_WARNING "foreach looping punk ass");
+			//printk(KERN_WARNING "foreach looping punk ass %d", temp->);
+			//if(temp->next)
+			//return;
+
+			printk(KERN_WARNING "afteer if statement foreach looping punk ass");
+			if (queued_passenger_count != 0)
+			{
+				passenger_count++;
+				queued_passenger_count--;
+			}
+		}
 	}
 	stop = false;
 
 	ssleep(1);
-	ssleep(3);
 }
 /******************************************************************************/
 int thread_run(void *data)
@@ -93,6 +100,7 @@ int thread_run(void *data)
 
 	while (!kthread_should_stop())
 	{
+
 		ssleep(2);
 		if (stop)
 		{
@@ -104,21 +112,29 @@ int thread_run(void *data)
 			{
 				parm->cnt++;
 
+				sprintf(elevator_thread.state, "LOADING");
+
 				if (parm->level == 10)
 				{
 					elevator_move = -1;
+					parm->level -= 1;
 				}
 				else if (parm->level == 1)
 				{
 					elevator_move = 1;
+					parm->level += 1;
+				}
+				else
+				{
+					parm->level += elevator_move;
 				}
 
-				sprintf(elevator_thread.state, "LOADING");
+				if (stop == false)
+				{
+				}
 				//unloading funtion
 				//loading_elevator();
 				//changing level
-
-				parm->level += elevator_move;
 
 				if (elevator_move == 1)
 				{
@@ -172,7 +188,7 @@ int start_elevator(void)
 extern int (*STUB_issue_request)(int, int, int);
 int issue_request(int start_floor, int destination_floor, int type)
 {
-	stop = true;
+
 	//queued_passenger_count++;
 	printk(KERN_WARNING "enters issue request");
 
@@ -184,7 +200,7 @@ int issue_request(int start_floor, int destination_floor, int type)
 
 	list_add_tail(&queued_passenger->list, &passenger_queue_list);
 	queued_passenger_count++;
-
+	stop = true;
 	//kfree(queued_passenger);
 
 	return 0;
@@ -202,6 +218,9 @@ int stop_elevator(void)
 void printElevator(void)
 {
 
+	// stop = true;
+	// if (mutex_lock_interruptible(&elevator_thread.mutex) == 0)
+	// {
 	sprintf(copyMessage, " ");
 	appendToMessage("\nElevator state: ");
 
@@ -225,6 +244,7 @@ void printElevator(void)
 
 	while (count != 0)
 	{
+		// stop = true;
 		appendToMessage("\n\n[");
 		if (count == elevator_thread.level)
 		{
@@ -236,7 +256,7 @@ void printElevator(void)
 		}
 
 		appendToMessage("] Floor ");
-		sprintf(strInt, "%d : ", count);
+		sprintf(strInt, "%d - %d : ", count, elevator_thread.level);
 		appendToMessage(strInt);
 		sprintf(strInt, " %d ", 3);
 		appendToMessage(strInt);
@@ -245,6 +265,9 @@ void printElevator(void)
 	}
 	appendToMessage("\n\n( “|” for human, “X” for zombie )\n");
 	sprintf(message, copyMessage);
+	// // }
+	// mutex_unlock(&elevator_thread.mutex);
+	// stop = false;
 }
 
 void appendToMessage(char *appendToMessage)
