@@ -21,6 +21,7 @@ void printElevator(void);
 void appendToMessage(char *appendToMessage);
 void loading_elevator(void *data);
 void unloading_elevator(void *data);
+void get_floor_status(int floor);
 
 static char *message;
 static char copyMessage[ENTRY_SIZE];
@@ -33,11 +34,14 @@ int count = 0;
 int passenger_count = 0;
 int queued_passenger_count = 0;
 int total_passenger_service = 0;
+int waiting_on_floor[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 int elevator_move = 1;
 
 bool stop = false;
 bool service_start = false;
+bool elevator_loading = false;
+bool elevator_infected = false;
 
 //passenger_struct
 typedef struct passenger
@@ -66,7 +70,7 @@ struct elevator_thread_parameter elevator_thread;
 
 void loading_elevator(void *data)
 {
-	//struct elevator_thread_parameter *parm = data;
+	struct elevator_thread_parameter *parm = data;
 	//stop = true;
 	printk(KERN_WARNING "enters loading elevator");
 
@@ -79,50 +83,58 @@ void loading_elevator(void *data)
 
 		list_for_each_safe(temp, dummy, &passenger_queue_list)
 		{
-			printk(KERN_WARNING "foreach looping punk ass");
-			if (temp != NULL)
+			if (passenger_count < 10)
 			{
-				p = list_entry(temp, Passenger, list);
-
-				printk(KERN_WARNING "p destination: %d \nstart : %d",
-					   p->destination_floor, p->start_floor);
-				if (p->start_floor == elevator_thread.level)
+				printk(KERN_WARNING "foreach looping punk ass");
+				if (temp != NULL)
 				{
-					printk(KERN_WARNING "p2 destination: %d \nstart : %d",
+					p = list_entry(temp, Passenger, list);
+
+					printk(KERN_WARNING "p destination: %d \nstart : %d",
 						   p->destination_floor, p->start_floor);
-					//list_del(temp);  //removes from linked list
-					list_move(temp, &passenger_list);
-					passenger_count++;
-					queued_passenger_count--;
-					ptest = list_last_entry(&passenger_list, Passenger, list);
 
-					printk(KERN_WARNING "ptest destination: %d \nstart : %d",
-						   ptest->destination_floor, ptest->start_floor);
-					printk(KERN_WARNING "kfree 3");
+					if (p->start_floor == elevator_thread.level)
+					{
 
-					//kfree(ptest); //d
+						elevator_loading = true;
+						sprintf(parm->state, "LOADING");
+						printk(KERN_WARNING "p2 destination: %d \nstart : %d",
+							   p->destination_floor, p->start_floor);
+						if (p->type == 1)
+						{
+
+							elevator_infected = true;
+						}
+						if ((p->type == 0 && !elevator_infected) || p->type == 1)
+						{
+							list_move(temp, &passenger_list);
+							passenger_count++;
+							queued_passenger_count--;
+							waiting_on_floor[p->start_floor - 1] -= 1;
+						}
+
+						ptest = list_last_entry(&passenger_list, Passenger, list);
+
+						printk(KERN_WARNING "ptest destination: %d \nstart : %d",
+							   ptest->destination_floor, ptest->start_floor);
+						printk(KERN_WARNING "kfree 3");
+					}
+
+					printk(KERN_WARNING "kfree 2");
 				}
-
-				printk(KERN_WARNING "kfree 2");
-
-				//kfree(p); //d
 			}
 		}
 
 		printk(KERN_WARNING "kfree 1");
-
-		//kfree(temp);
-		//kfree(dummy);
 	}
 	stop = false;
-
-	ssleep(1);
 }
 
 void unloading_elevator(void *data)
 {
-	//struct elevator_thread_parameter *parm = data;
+	struct elevator_thread_parameter *parm = data;
 	stop = true;
+
 	printk(KERN_WARNING "enters unloading elevator");
 
 	if (passenger_count != 0 && !list_empty_careful(&passenger_list))
@@ -140,15 +152,20 @@ void unloading_elevator(void *data)
 
 				if (p->destination_floor == elevator_thread.level)
 				{
+					sprintf(parm->state, "LOADING");
+					elevator_loading = true;
 					list_del(temp); //removes from linked list
-					//list_move_tail(temp, &passenger_list);
 					passenger_count--;
 					total_passenger_service += 1;
 				}
 			}
 		}
 	}
-	//stop = false;
+
+	if (passenger_count == 0)
+	{
+		elevator_infected = false;
+	}
 }
 /******************************************************************************/
 int thread_run(void *data)
@@ -161,8 +178,8 @@ int thread_run(void *data)
 		ssleep(2);
 		if (stop)
 		{
-			if (parm != NULL)
-				sprintf(parm->state, "LOADING");
+			// if (parm != NULL)
+			// 	sprintf(parm->state, "LOADING");
 
 			unloading_elevator(parm);
 			loading_elevator(parm);
@@ -185,7 +202,12 @@ int thread_run(void *data)
 
 				if (stop == false && parm != NULL)
 				{
-
+					if (elevator_loading)
+					{
+						ssleep(1);
+						elevator_loading = false;
+					}
+					//
 					parm->level += elevator_move;
 
 					if (elevator_move == 1)
@@ -278,6 +300,7 @@ int issue_request(int start_floor, int destination_floor, int type)
 
 	list_add_tail(&queued_passenger->list, &passenger_queue_list);
 	queued_passenger_count++;
+	waiting_on_floor[start_floor - 1] += 1;
 
 	test = list_last_entry(&passenger_queue_list, Passenger, list);
 
@@ -296,14 +319,46 @@ int stop_elevator(void)
 	return 3;
 }
 
+void get_floor_status(int floor)
+{
+
+	Passenger *p;
+	struct list_head *temp;
+
+	list_for_each(temp, &passenger_queue_list)
+	{
+		p = list_entry(temp, Passenger, list);
+		if (floor == p->start_floor)
+		{
+			if (p->type == 0)
+			{
+
+				appendToMessage("|");
+			}
+			else
+			{
+
+				appendToMessage("X");
+			}
+		}
+	}
+}
 void printElevator(void)
 {
+	//int i = 0;
 	sprintf(copyMessage, " ");
 	appendToMessage("\nElevator state: ");
 
 	appendToMessage(elevator_thread.state);
 
-	appendToMessage("\nElevator status: Infected");
+	if (elevator_infected)
+	{
+		appendToMessage("\nElevator status: Infected");
+	}
+	else
+	{
+		appendToMessage("\nElevator status: Not Infected");
+	}
 	appendToMessage("\nCurrent floor: ");
 	sprintf(strInt, "%d ", elevator_thread.level);
 	appendToMessage(strInt);
@@ -335,9 +390,9 @@ void printElevator(void)
 		appendToMessage("] Floor ");
 		sprintf(strInt, "%d : ", count);
 		appendToMessage(strInt);
-		sprintf(strInt, " %d ", 3);
+		sprintf(strInt, " %d ", waiting_on_floor[count - 1]);
 		appendToMessage(strInt);
-		appendToMessage(" | | X");
+		get_floor_status(count);
 		count--;
 	}
 	appendToMessage("\n\n( “|” for human, “X” for zombie )\n");
