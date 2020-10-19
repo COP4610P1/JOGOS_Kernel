@@ -1,15 +1,11 @@
-//references https://www.kernel.org/doc/htmldocs/kernel-api/
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/proc_fs.h> //file system calls
-#include <linux/uaccess.h> //memory copy from kernel <-> userspace
+#include <linux/proc_fs.h>
+#include <linux/uaccess.h>
 #include <linux/time.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
-//static void copyString(char * lString, char * rString);
-
-//static void timespec_subtract (struct timespec * result, struct timespec * x, struct timespec * y);
 
 #define BUF_LEN 100 //max length of read/write message
 
@@ -18,54 +14,71 @@ static struct proc_dir_entry *proc_entry; //pointer to proc entry
 static char msg[BUF_LEN];  //buffer to store read/write message
 static int procfs_buf_len; //variable to hold length of message
 
+//storing the time for the last call
 static struct timespec last_time;
+
+//storing the time for the amount of time passed since the last call
 static struct timespec elasped_time;
 
 static ssize_t procfile_read(struct file *file, char *ubuf, size_t count, loff_t *ppos)
 {
-    struct timespec current_time = current_kernel_time();
+	//getting the current time
+	struct timespec current_time = current_kernel_time();
 
-    if((long)last_time.tv_sec == 0){
+	//if the last time is zero display only the current time
+	if ((long)last_time.tv_sec == 0)
+	{
 
-        sprintf(msg, "The current time is : %lld.%.9ld\n", (long long) current_time.tv_sec, current_time.tv_nsec);
-       last_time = current_time;
-      
-    }else{
-        elasped_time = timespec_sub(current_time, last_time);
-        //timespec_subtract ( &elasped_time, &last_time, &current_time);
-        sprintf(msg, "The current time: %lld.%.9ld\nelasped time: %lld.%.9ld\n", 
-        (long long) current_time.tv_sec, current_time.tv_nsec, 
-         (long long) elasped_time.tv_sec, elasped_time.tv_nsec );
-      last_time = current_time; 
-    }
+		sprintf(msg, "The current time is : %lld.%.9ld\n",
+				(long long)current_time.tv_sec, current_time.tv_nsec);
+		//setting the last time to current time
+		last_time = current_time;
+	}
+	else
+	{
+		//getting the elasped time by substracting current time and last time
+		elasped_time = timespec_sub(current_time, last_time);
+
+		sprintf(msg, "The current time: %lld.%.9ld\nelasped time: %lld.%.9ld\n",
+				(long long)current_time.tv_sec, current_time.tv_nsec,
+				(long long)elasped_time.tv_sec, elasped_time.tv_nsec);
+
+		last_time = current_time;
+	}
 
 	printk(KERN_INFO "proc_read\n");
 	procfs_buf_len = strlen(msg);
 
-    
-
-	if (*ppos > 0 || count < procfs_buf_len) //check if data already read and if space in user buffer
+	//check if data already read and if space in user buffer
+	if (*ppos > 0 || count < procfs_buf_len)
 		return 0;
-	
 
-
-	if (copy_to_user(ubuf, msg, procfs_buf_len)) //send data to user buffer
+	//send data to user buffer
+	if (copy_to_user(ubuf, msg, procfs_buf_len))
 		return -EFAULT;
+
 	*ppos = procfs_buf_len; //update position
+
 	printk(KERN_INFO "gave to user %s\n", msg);
+
 	return procfs_buf_len; //return number of characters read
 }
 
 static ssize_t procfile_write(struct file *file, const char *ubuf, size_t count, loff_t *ppos)
 {
 	printk(KERN_INFO "proc_write\n");
+
 	//write min(user message size, buffer length) characters
 	if (count > BUF_LEN)
 		procfs_buf_len = BUF_LEN;
 	else
 		procfs_buf_len = count;
+
+	// copying mes to user buffer for display
 	copy_from_user(msg, ubuf, procfs_buf_len);
+
 	printk(KERN_INFO "got from user: %s\n", msg);
+
 	return procfs_buf_len;
 }
 
@@ -74,40 +87,24 @@ static struct file_operations procfile_fops = {
 	.read = procfile_read, //fill in callbacks to read/write functions
 	.write = procfile_write,
 };
-static int hello_init(void)
+
+static int my_timer_init(void)
 {
 	//proc_create(filename, permissions, parent, pointer to fops)
+	//creating the proc entry
 	proc_entry = proc_create("timer", 0666, NULL, &procfile_fops);
 	if (proc_entry == NULL)
 		return -ENOMEM;
+
 	return 0;
 }
 
-static void hello_exit(void)
+static void my_timer_exit(void)
 {
+	//removing the proc entry
 	proc_remove(proc_entry);
 	return;
 }
 
-
-
-//reference : https://ftp.gnu.org/old-gnu/Manuals/glibc-2.2.5/html_node/Elapsed-Time.html
-/* Subtract the `struct timeval' values X and Y,
-   storing the result in RESULT.
-   Return 1 if the difference is negative, otherwise 0.  */
-/*
-static void timespec_subtract (struct timespec * result, struct timespec * start, struct timespec * stop){
-
-if ((stop->tv_nsec - start->tv_nsec) < 0) {
-        result->tv_sec = stop->tv_sec - start->tv_sec - 1;
-        result->tv_nsec = stop->tv_nsec - start->tv_nsec + 1000000000;
-    } else {
-        result->tv_sec = stop->tv_sec - start->tv_sec;
-        result->tv_nsec = stop->tv_nsec - start->tv_nsec;
-    }
-
-}*/
-
-
-module_init(hello_init);
-module_exit(hello_exit);
+module_init(my_timer_init);
+module_exit(my_timer_exit);

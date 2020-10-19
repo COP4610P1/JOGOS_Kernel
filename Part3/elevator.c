@@ -11,41 +11,73 @@
 
 MODULE_LICENSE("GPL");
 
-#define ENTRY_NAME "elevator4"
+#define ENTRY_NAME "elevator"
 #define ENTRY_SIZE 2000
 #define PERMS 0644
 #define PARENT NULL
 #define CNT_SIZE 20
+
 //functions
+
+//prints the elevator
 void printElevator(void);
+// utility function to append a string to the message output
 void appendToMessage(char *appendToMessage);
+
+//function to load the elevator
 void loading_elevator(void *data);
+
+//function to unload the elevator
 void unloading_elevator(void *data);
+
+//append the floor status to the message output
 void get_floor_status(int floor);
 
+//variables
+//use to send a message to the user buffer/proc entry
 static char *message;
+
+//utility variable use to copy a string
 static char copyMessage[ENTRY_SIZE];
-static const int MAXPASSENGER = 10;
-static const int MAXFLOOR = 10;
+//use for the proc entry
 static struct file_operations fops;
 static int read_p;
+
+//utility variable use for storing string version of ints
 char strInt[15];
+//utility variable use for incrementing or decrementing loops
 int count = 0;
+
+//keep count of passengers on the elevator
 int passenger_count = 0;
+//keep count of passengers waiting for the elevator
 int queued_passenger_count = 0;
+
+//keep count of passengers serviced by the elevator
 int total_passenger_service = 0;
+
+// store the number of passengers waiting on each floor
 int waiting_on_floor[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
+//use to either move the elevator up or down
+//stores either 1 or -1
 int elevator_move = 1;
 
-bool stop = false;
+//use to check if the elevator already started
 bool service_start = false;
+
+//use to check if the elevator is loading
 bool elevator_loading = false;
+//use to check if the elevator has been infected
 bool elevator_infected = false;
+
+//use to check if the elevator has stopped
 bool elevator_stop = false;
+
+//indicates that the elevator started for the first time
 bool initial_start = true;
 
-//passenger_struct
+//passenger_struct to store info on the passenger
 typedef struct passenger
 {
 	int type;
@@ -55,9 +87,13 @@ typedef struct passenger
 
 } Passenger;
 
+//list to store all the passenger in the elevator
 struct list_head passenger_list = LIST_HEAD_INIT(passenger_list);
+
+//list to store all the passenger waiting for the elevator
 struct list_head passenger_queue_list = LIST_HEAD_INIT(passenger_queue_list);
 
+//keeps the thread info
 struct elevator_thread_parameter
 {
 	int id;
@@ -68,76 +104,69 @@ struct elevator_thread_parameter
 	struct mutex mutex;
 };
 
+// thread that manipulates the eleavtor position and loading
+//and unloading of passengers
 struct elevator_thread_parameter elevator_thread;
 
+//function to load the elevator
 void loading_elevator(void *data)
 {
 	struct elevator_thread_parameter *parm = data;
-	//stop = true;
-	printk(KERN_WARNING "enters loading elevator");
 
 	if (queued_passenger_count != 0 && !list_empty_careful(&passenger_queue_list))
 	{
 		Passenger *p;
-		Passenger *ptest;
 		struct list_head *temp;
 		struct list_head *dummy;
 
+		//looping throught the queue to load passengers if the
+		//their floor and elevator floor equals
 		list_for_each_safe(temp, dummy, &passenger_queue_list)
 		{
+			//only load passenger if there is space (<10 passenger)
+			//in elevator
 			if (passenger_count < 10)
 			{
-				printk(KERN_WARNING "foreach looping punk ass");
 				if (temp != NULL)
 				{
 					p = list_entry(temp, Passenger, list);
-
-					printk(KERN_WARNING "p destination: %d \nstart : %d",
-						   p->destination_floor, p->start_floor);
 
 					if (p->start_floor == elevator_thread.level)
 					{
 
 						elevator_loading = true;
+						//changing state
 						sprintf(parm->state, "LOADING");
-						printk(KERN_WARNING "p2 destination: %d \nstart : %d",
-							   p->destination_floor, p->start_floor);
+
+						//if zombie exist the elevator is now infected
 						if (p->type == 1)
 						{
-
 							elevator_infected = true;
 						}
+
+						//only load humans if the elevator is not infected
+						//Or the passenger is a zombie
 						if ((p->type == 0 && !elevator_infected) || p->type == 1)
 						{
+							//moving the entry in the queue to the passenger list(elevator)
 							list_move(temp, &passenger_list);
 							passenger_count++;
 							queued_passenger_count--;
+
+							//decreasing the amount waiting on each floor
 							waiting_on_floor[p->start_floor - 1] -= 1;
 						}
-
-						ptest = list_last_entry(&passenger_list, Passenger, list);
-
-						printk(KERN_WARNING "ptest destination: %d \nstart : %d",
-							   ptest->destination_floor, ptest->start_floor);
-						printk(KERN_WARNING "kfree 3");
 					}
-
-					printk(KERN_WARNING "kfree 2");
 				}
 			}
 		}
-
-		printk(KERN_WARNING "kfree 1");
 	}
-	//stop = false;
 }
 
+//function to unload the elevator
 void unloading_elevator(void *data)
 {
 	struct elevator_thread_parameter *parm = data;
-	//stop = true;
-
-	printk(KERN_WARNING "enters unloading elevator");
 
 	if (passenger_count != 0 && !list_empty_careful(&passenger_list))
 	{
@@ -145,37 +174,46 @@ void unloading_elevator(void *data)
 		struct list_head *temp;
 		struct list_head *dummy;
 
+		//looping throught the passengers on the elevator for unloading
+		//if their floor and elevator floor equals
 		list_for_each_safe(temp, dummy, &passenger_list)
 		{
-			printk(KERN_WARNING "foreach looping punk ass");
 			if (temp != NULL)
 			{
 				p = list_entry(temp, Passenger, list);
 
 				if (p->destination_floor == elevator_thread.level)
 				{
+					//changing state
 					sprintf(parm->state, "LOADING");
 					elevator_loading = true;
-					list_del(temp); //removes from linked list
+					//removes passenger from passenger list (elevator)
+					list_del(temp);
 					passenger_count--;
+
 					total_passenger_service += 1;
 				}
 			}
 		}
 	}
 
+	// elevator is no longer infected if
+	//elevator doesn't has passengers
 	if (passenger_count == 0)
 	{
 		elevator_infected = false;
 	}
 }
-/******************************************************************************/
+
+//function use to run the thread
 int thread_run(void *data)
 {
 	struct elevator_thread_parameter *parm = data;
 
+	// runs thread unless stop is triggered
 	while (!kthread_should_stop())
 	{
+		// changes state to offline or idle for start or stop
 		if (queued_passenger_count == 0 && passenger_count == 0)
 		{
 			if (elevator_stop)
@@ -188,51 +226,50 @@ int thread_run(void *data)
 				sprintf(parm->state, "IDLE");
 			}
 		}
+
+		//if there is passenger to service
 		if (queued_passenger_count > 0 || passenger_count > 0)
 		{
 			ssleep(2);
-			//if (stop)
-			//{
-				// if (parm != NULL)
-				// sprintf(parm->state, "LOADING");
-			//}
+
 			if (parm != NULL)
 			{
 				unloading_elevator(parm);
-                                if (!elevator_stop)
-                                {
-                                        loading_elevator(parm);
-                                }
 
+				//doesn't load passengers if the the elevator stops
+				if (!elevator_stop)
+				{
+					loading_elevator(parm);
+				}
 
 				if (mutex_lock_interruptible(&parm->mutex) == 0)
 				{
-					//parm->cnt++;
-
+					// if changes the direction of the elevator
 					if (parm->level == 10)
 					{
-						elevator_move = -1;
+						elevator_move = -1; // down
 					}
 					else if (parm->level == 1)
 					{
-						elevator_move = 1;
+						elevator_move = 1; //up
 					}
 
-					//if (stop == false && parm != NULL)
-					//{
+					//stop elevator from moving if the elevator stop function called
+					//and no more passenger to service
 					if (!elevator_stop || passenger_count > 0)
-                                        {
+					{
 						if (elevator_loading)
 						{
 							ssleep(1);
 							elevator_loading = false;
 						}
 
+						//changing elevator levels
 						parm->level += elevator_move;
 
+						//displays up or down base on the direction
 						if (elevator_move == 1)
 						{
-							//sprintf(elevator_thread.state, "UP");
 							sprintf(parm->state, "UP");
 						}
 						else if (elevator_move == -1)
@@ -244,9 +281,6 @@ int thread_run(void *data)
 					{
 						sprintf(parm->state, "OFFLINE");
 					}
-					//}
-					printk(KERN_WARNING "level ++");
-					//stop = true;
 				}
 
 				mutex_unlock(&parm->mutex);
@@ -260,13 +294,14 @@ int thread_run(void *data)
 
 	if (parm != NULL)
 	{
-		printk(KERN_WARNING "kfree 66");
 
 		kfree(parm);
 	}
+
 	return 0;
 }
 
+//function use to initialize the thread
 void thread_init_parameter(struct elevator_thread_parameter *parm)
 {
 
@@ -274,27 +309,35 @@ void thread_init_parameter(struct elevator_thread_parameter *parm)
 
 	parm->id = id++;
 	parm->cnt = 0;
-	//sprintf(parm->state, "OFFLINE");
+
+	// initializing the mutex for locking
 	mutex_init(&parm->mutex);
-	parm->kthread = kthread_run(thread_run, parm, "thread example %d", parm->id);
+
+	//starting the thread
+	parm->kthread = kthread_run(thread_run, parm, "thread  %d", parm->id);
 }
 
+//linked function to system call to start elevator
 extern int (*STUB_start_elevator)(void);
 int start_elevator(void)
 {
+	//checks if elevator is running
 	if (service_start == true)
 	{
 		return 1;
 	}
+
+	//checks if elevator already started
 	if (initial_start == true)
 	{
-		stop = false;
 		elevator_stop = false;
 
-		printk(KERN_NOTICE "%s: start elevator module\n", __FUNCTION__);
 		sprintf(elevator_thread.state, "IDLE");
 		elevator_thread.level = 1;
+
+		// initialize thread
 		thread_init_parameter(&elevator_thread);
+
 		if (IS_ERR(elevator_thread.kthread))
 		{
 			printk(KERN_WARNING "error spawning thread");
@@ -304,73 +347,77 @@ int start_elevator(void)
 	}
 	else
 	{
-		stop = false;
 		elevator_stop = false;
-		printk(KERN_NOTICE "%s: start elevator module\n", __FUNCTION__);
 	}
 
 	service_start = true;
 	return 0;
 }
 
+//linked function to system call to issue request to elevator
 extern int (*STUB_issue_request)(int, int, int);
 int issue_request(int start_floor, int destination_floor, int type)
 {
 	Passenger *queued_passenger;
-	Passenger *test;
+
+	// doesn't accept request if elevator stop
 	if (!elevator_stop)
 	{
+		// bad request
 		if (start_floor > 10 && destination_floor > 10 && type > 1)
 			return 1;
 
-		stop = true;
-
-		printk(KERN_WARNING "enters issue request start %d, \ndes %d \ntype %d",
-			   start_floor, destination_floor, type);
-
+		//allocating memory for a new passenger to wait for the elevator
 		queued_passenger = kmalloc(sizeof(Passenger), __GFP_RECLAIM);
+
 		if (queued_passenger == NULL)
 		{
-			printk(KERN_WARNING "Queue Error");
+			printk(KERN_WARNING "List Error");
 			return -ENOMEM;
 		}
 
+		//creating a new passenger to wait for the elevator
 		queued_passenger->type = type;
 		queued_passenger->destination_floor = destination_floor;
 		queued_passenger->start_floor = start_floor;
 
+		//adding passenger to the list
 		list_add_tail(&queued_passenger->list, &passenger_queue_list);
 		queued_passenger_count++;
+
+		// adding to the passenger waiting on each floor
 		waiting_on_floor[start_floor - 1] += 1;
-
-		test = list_last_entry(&passenger_queue_list, Passenger, list);
-
-		printk(KERN_WARNING "enters issue request start %d, \ndes %d \ntype %d",
-			   test->start_floor, test->destination_floor, test->type);
 	}
 
 	return 0;
 }
 
+//linked function to system call to stop elevator
 extern int (*STUB_stop_elevator)(void);
 int stop_elevator(void)
 {
-	if(elevator_stop)
+	//elevator already stop
+	if (elevator_stop)
 	{
 		return 1;
 	}
+
+	//stop elevator
 	elevator_stop = true;
 	initial_start = false;
 	service_start = false;
 	return 0;
 }
 
+//append the floor status to the message output
 void get_floor_status(int floor)
 {
 
 	Passenger *p;
 	struct list_head *temp;
 
+	//loop to check passengers waiting for zombies
+	//then append it to output
 	list_for_each(temp, &passenger_queue_list)
 	{
 		p = list_entry(temp, Passenger, list);
@@ -389,9 +436,12 @@ void get_floor_status(int floor)
 		}
 	}
 }
+
+//prints the elevator
+// This entire function append to output (message) for the proc
 void printElevator(void)
 {
-	//int i = 0;
+
 	sprintf(copyMessage, " ");
 	appendToMessage("\nElevator state: ");
 
@@ -422,7 +472,7 @@ void printElevator(void)
 
 	while (count != 0)
 	{
-		// stop = true;
+
 		appendToMessage("\n\n[");
 		if (count == elevator_thread.level)
 		{
@@ -445,30 +495,35 @@ void printElevator(void)
 	sprintf(message, copyMessage);
 }
 
+// utility function to append a string to the message output
 void appendToMessage(char *appendToMessage)
 {
 
 	strcat(copyMessage, appendToMessage);
 }
 
+// opens the proc entry
 int thread_proc_open(struct inode *sp_inode, struct file *sp_file)
 {
 
 	read_p = 1;
 
+	//allocating memory for the proc message
 	message = kmalloc(sizeof(char) * ENTRY_SIZE, __GFP_RECLAIM | __GFP_IO | __GFP_FS);
 
 	if (message == NULL)
 	{
-		printk(KERN_WARNING "hello_proc_open");
+		printk(KERN_WARNING "elevator_proc_open");
 		return -ENOMEM;
 	}
 
+	//prints the elevator
 	printElevator();
 
 	return 0;
 }
 
+//reads the proc entry
 ssize_t thread_proc_read(struct file *sp_file, char __user *buf, size_t size, loff_t *offset)
 {
 
@@ -478,27 +533,29 @@ ssize_t thread_proc_read(struct file *sp_file, char __user *buf, size_t size, lo
 	if (read_p)
 		return 0;
 
+	//copy the message created to the user buffer
 	copy_to_user(buf, message, len);
 
 	return len;
 }
 
+//clear memory and releases proc
 int thread_proc_release(struct inode *sp_inode, struct file *sp_file)
 {
-
+	//clear the message space
 	kfree(message);
 	return 0;
 }
 
-/******************************************************************************/
-
+//initalize the module
 static int elevator_module_init(void)
 {
-
+	//link system calls to functions
 	STUB_start_elevator = start_elevator;
 	STUB_issue_request = issue_request;
 	STUB_stop_elevator = stop_elevator;
 
+	//link proc calls to functions
 	fops.open = thread_proc_open;
 	fops.read = thread_proc_read;
 	fops.release = thread_proc_release;
@@ -516,13 +573,14 @@ static int elevator_module_init(void)
 
 module_init(elevator_module_init);
 
+//exit the module
+//cleans up state
 static void elevator_module_exit(void)
 {
 
-	stop = true;
 	printk(KERN_WARNING "remove proc");
 	remove_proc_entry(ENTRY_NAME, NULL);
-	printk(KERN_WARNING "kfree 44");
+
 	if (elevator_thread.kthread != NULL)
 		kthread_stop(elevator_thread.kthread);
 
@@ -533,9 +591,6 @@ static void elevator_module_exit(void)
 	STUB_issue_request = NULL;
 	STUB_stop_elevator = NULL;
 
-	// kfree(test);
-	// kfree(queued_passenger);
-	// kfree(message);
 	printk(KERN_NOTICE "Removing /proc/%s\n", ENTRY_NAME);
 }
 
