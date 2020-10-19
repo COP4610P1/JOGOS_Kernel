@@ -11,7 +11,7 @@
 
 MODULE_LICENSE("GPL");
 
-#define ENTRY_NAME "elevator"
+#define ENTRY_NAME "elevator4"
 #define ENTRY_SIZE 2000
 #define PERMS 0644
 #define PARENT NULL
@@ -43,6 +43,7 @@ bool service_start = false;
 bool elevator_loading = false;
 bool elevator_infected = false;
 bool elevator_stop = false;
+bool initial_start = true;
 
 //passenger_struct
 typedef struct passenger
@@ -114,11 +115,11 @@ void loading_elevator(void *data)
 							waiting_on_floor[p->start_floor - 1] -= 1;
 						}
 
-						//	ptest = list_last_entry(&passenger_list, Passenger, list);
+						ptest = list_last_entry(&passenger_list, Passenger, list);
 
-						// printk(KERN_WARNING "ptest destination: %d \nstart : %d",
-						// 	   ptest->destination_floor, ptest->start_floor);
-						// printk(KERN_WARNING "kfree 3");
+						printk(KERN_WARNING "ptest destination: %d \nstart : %d",
+							   ptest->destination_floor, ptest->start_floor);
+						printk(KERN_WARNING "kfree 3");
 					}
 
 					printk(KERN_WARNING "kfree 2");
@@ -128,13 +129,13 @@ void loading_elevator(void *data)
 
 		printk(KERN_WARNING "kfree 1");
 	}
-	stop = false;
+	//stop = false;
 }
 
 void unloading_elevator(void *data)
 {
 	struct elevator_thread_parameter *parm = data;
-	stop = true;
+	//stop = true;
 
 	printk(KERN_WARNING "enters unloading elevator");
 
@@ -177,30 +178,32 @@ int thread_run(void *data)
 	{
 		if (queued_passenger_count == 0 && passenger_count == 0)
 		{
-			// if (elevator_stop)
-			// {
+			if (elevator_stop)
+			{
 
-			// 	sprintf(parm->state, "OFFLINE");
-			// }
-			// else
-			// {
-			sprintf(parm->state, "IDLE");
-			// }
+				sprintf(parm->state, "OFFLINE");
+			}
+			else
+			{
+				sprintf(parm->state, "IDLE");
+			}
 		}
 		if (queued_passenger_count > 0 || passenger_count > 0)
 		{
 			ssleep(2);
-			if (stop)
-			{
+			//if (stop)
+			//{
 				// if (parm != NULL)
 				// sprintf(parm->state, "LOADING");
-
-				unloading_elevator(parm);
-				//if (!elevator_stop)
-				loading_elevator(parm);
-			}
-			else if (parm != NULL)
+			//}
+			if (parm != NULL)
 			{
+				unloading_elevator(parm);
+                                if (!elevator_stop)
+                                {
+                                        loading_elevator(parm);
+                                }
+
 
 				if (mutex_lock_interruptible(&parm->mutex) == 0)
 				{
@@ -215,8 +218,10 @@ int thread_run(void *data)
 						elevator_move = 1;
 					}
 
-					if (stop == false && parm != NULL)
-					{
+					//if (stop == false && parm != NULL)
+					//{
+					if (!elevator_stop || passenger_count > 0)
+                                        {
 						if (elevator_loading)
 						{
 							ssleep(1);
@@ -235,15 +240,20 @@ int thread_run(void *data)
 							sprintf(parm->state, "DOWN");
 						}
 					}
+					else
+					{
+						sprintf(parm->state, "OFFLINE");
+					}
+					//}
 					printk(KERN_WARNING "level ++");
-					stop = true;
+					//stop = true;
 				}
 
 				mutex_unlock(&parm->mutex);
 			}
 			else
 			{
-				//break;
+				break;
 			}
 		}
 	}
@@ -252,7 +262,7 @@ int thread_run(void *data)
 	{
 		printk(KERN_WARNING "kfree 66");
 
-		//kfree(parm);
+		kfree(parm);
 	}
 	return 0;
 }
@@ -272,26 +282,31 @@ void thread_init_parameter(struct elevator_thread_parameter *parm)
 extern int (*STUB_start_elevator)(void);
 int start_elevator(void)
 {
-
-	stop = false;
-
-	elevator_stop = false;
-
 	if (service_start == true)
-		return 1; //already active
-
-	printk(KERN_NOTICE "%s: start elevator module\n", __FUNCTION__);
-	sprintf(elevator_thread.state, "IDLE"); //elevator state
-	//elevator_thread.level = 1;				//current floor
-
-	if (elevator_thread.kthread != NULL)
-		thread_init_parameter(&elevator_thread);
-
-	if (IS_ERR(elevator_thread.kthread))
 	{
-		printk(KERN_WARNING "error spawning thread");
-		remove_proc_entry(ENTRY_NAME, NULL);
-		return PTR_ERR(elevator_thread.kthread);
+		return 1;
+	}
+	if (initial_start == true)
+	{
+		stop = false;
+		elevator_stop = false;
+
+		printk(KERN_NOTICE "%s: start elevator module\n", __FUNCTION__);
+		sprintf(elevator_thread.state, "IDLE");
+		elevator_thread.level = 1;
+		thread_init_parameter(&elevator_thread);
+		if (IS_ERR(elevator_thread.kthread))
+		{
+			printk(KERN_WARNING "error spawning thread");
+			remove_proc_entry(ENTRY_NAME, NULL);
+			return PTR_ERR(elevator_thread.kthread);
+		}
+	}
+	else
+	{
+		stop = false;
+		elevator_stop = false;
+		printk(KERN_NOTICE "%s: start elevator module\n", __FUNCTION__);
 	}
 
 	service_start = true;
@@ -303,36 +318,36 @@ int issue_request(int start_floor, int destination_floor, int type)
 {
 	Passenger *queued_passenger;
 	Passenger *test;
-	// if (!elevator_stop)
-	// {
-	// 	if (start_floor > 10 && destination_floor > 10 && type > 1)
-	return 1;
-
-	stop = true;
-
-	printk(KERN_WARNING "enters issue request start %d, \ndes %d \ntype %d",
-		   start_floor, destination_floor, type);
-
-	queued_passenger = kmalloc(sizeof(Passenger), __GFP_RECLAIM);
-	if (queued_passenger == NULL)
+	if (!elevator_stop)
 	{
-		printk(KERN_WARNING "null list");
-		return -ENOMEM;
+		if (start_floor > 10 && destination_floor > 10 && type > 1)
+			return 1;
+
+		stop = true;
+
+		printk(KERN_WARNING "enters issue request start %d, \ndes %d \ntype %d",
+			   start_floor, destination_floor, type);
+
+		queued_passenger = kmalloc(sizeof(Passenger), __GFP_RECLAIM);
+		if (queued_passenger == NULL)
+		{
+			printk(KERN_WARNING "Queue Error");
+			return -ENOMEM;
+		}
+
+		queued_passenger->type = type;
+		queued_passenger->destination_floor = destination_floor;
+		queued_passenger->start_floor = start_floor;
+
+		list_add_tail(&queued_passenger->list, &passenger_queue_list);
+		queued_passenger_count++;
+		waiting_on_floor[start_floor - 1] += 1;
+
+		test = list_last_entry(&passenger_queue_list, Passenger, list);
+
+		printk(KERN_WARNING "enters issue request start %d, \ndes %d \ntype %d",
+			   test->start_floor, test->destination_floor, test->type);
 	}
-
-	queued_passenger->type = type;
-	queued_passenger->destination_floor = destination_floor;
-	queued_passenger->start_floor = start_floor;
-
-	list_add_tail(&queued_passenger->list, &passenger_queue_list);
-	queued_passenger_count++;
-	waiting_on_floor[start_floor - 1] += 1;
-
-	test = list_last_entry(&passenger_queue_list, Passenger, list);
-
-	printk(KERN_WARNING "enters issue request start %d, \ndes %d \ntype %d",
-		   test->start_floor, test->destination_floor, test->type);
-	// }
 
 	return 0;
 }
@@ -340,11 +355,13 @@ int issue_request(int start_floor, int destination_floor, int type)
 extern int (*STUB_stop_elevator)(void);
 int stop_elevator(void)
 {
-	// if (elevator_stop) //in process of deactivating
-	// 	return 1;
-
-	// elevator_stop = true;
-	// service_start = false;
+	if(elevator_stop)
+	{
+		return 1;
+	}
+	elevator_stop = true;
+	initial_start = false;
+	service_start = false;
 	return 0;
 }
 
