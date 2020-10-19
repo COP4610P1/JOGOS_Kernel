@@ -180,11 +180,11 @@ int thread_run(void *data)
 			if (elevator_stop)
 			{
 
-				sprintf(elevator_thread.state, "OFFLINE");
+				sprintf(parm->state, "OFFLINE");
 			}
 			else
 			{
-				sprintf(elevator_thread.state, "IDLE");
+				sprintf(parm->state, "IDLE");
 			}
 		}
 		if (queued_passenger_count > 0 || passenger_count > 0)
